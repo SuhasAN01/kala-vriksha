@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import ParticleBackground from '../components/ParticleBackground';
 import useReveal from '../components/useReveal';
+import Navbar from '../components/Navbar';
+import { useToast } from '../components/Toast';
+import Spinner from '../components/Spinner';
 
 /* ─── Stat Counter ─────────────────────────────────────────────── */
 function StatCounter({ target }) {
@@ -36,6 +39,7 @@ function StatCounter({ target }) {
 
 /* ─── Contact Form ─────────────────────────────────────────────── */
 function ContactForm() {
+  const { showToast } = useToast();
   const [form, setForm] = useState({ name: '', email: '', message: '' });
   const [status, setStatus] = useState(null); // 'sending' | 'sent' | 'error'
 
@@ -50,28 +54,21 @@ function ContactForm() {
       });
       if (res.ok) {
         setStatus('sent');
+        showToast('Your wisdom has been received! We\'ll connect soon.');
         setForm({ name: '', email: '', message: '' });
         setTimeout(() => setStatus(null), 5000);
       } else {
         setStatus('error');
+        showToast('The connection was interrupted. Please try again.', 'error');
       }
     } catch {
       setStatus('error');
+      showToast('A network error occurred.', 'error');
     }
   };
 
   return (
     <form onSubmit={handleSubmit} className="contact-form reveal">
-      {status === 'sent' && (
-        <div className="alert alert-success mb-4">
-          Your wisdom has been received! We&apos;ll connect soon.
-        </div>
-      )}
-      {status === 'error' && (
-        <div className="alert alert-danger mb-4">
-          The connection was interrupted. Please try again.
-        </div>
-      )}
       <div className="mb-4">
         <input
           type="text" className="form-control"
@@ -98,9 +95,10 @@ function ContactForm() {
       </div>
       <button
         type="submit"
-        className="btn btn-glow w-100"
+        className="btn btn-glow w-100 d-flex align-items-center justify-content-center"
         disabled={status === 'sending'}
       >
+        {status === 'sending' ? <Spinner size="1.2rem" color="#000" className="me-2" /> : null}
         {status === 'sending' ? 'Sending...' : 'Send Wisdom'}
       </button>
     </form>
@@ -108,12 +106,13 @@ function ContactForm() {
 }
 
 /* ─── Main Page ─────────────────────────────────────────────────── */
-export default function HomePage({ events, user }) {
+export default function HomePage({ events = [], user = null }) {
   useReveal();
   const router = useRouter();
-  const [navOpen, setNavOpen] = useState(false);
+  const { showToast } = useToast();
   const [showBackTop, setShowBackTop] = useState(false);
   const [alertMsg, setAlertMsg] = useState(null);
+  const [filter, setFilter] = useState('online');
   const { status, msg } = router.query;
 
   useEffect(() => {
@@ -132,14 +131,9 @@ export default function HomePage({ events, user }) {
 
   const scrollTo = id => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
-    setNavOpen(false);
   };
 
-  const copyUPI = () => {
-    navigator.clipboard.writeText('ashishsony45@ybl').then(() => {
-      alert('UPI ID copied to clipboard!');
-    });
-  };
+  const filteredEvents = (events || []).filter(ev => (ev?.type || 'online') === filter);
 
   const pillars = [
     { icon: 'fa-om', title: 'Spiritual', sub: 'Connection to Divine' },
@@ -215,104 +209,23 @@ export default function HomePage({ events, user }) {
       )}
 
       {/* ── Navbar ────────────────────────────────────────────── */}
-      <nav className="navbar navbar-expand-lg navbar-dark bg-transparent fixed-top py-3">
-        <div className="container">
-          <a
-            className="navbar-brand gold-gradient-text"
-            href="#hero"
-            onClick={e => { e.preventDefault(); scrollTo('hero'); }}
-            style={{ fontSize: '1.8rem' }}
-          >
-            <img
-              src="/logo.png" alt="Logo" className="brand-logo"
-              onError={e => { e.target.style.display = 'none'; }}
-            />
-            KALA VRIKSHA
-          </a>
-          <button
-            className="navbar-toggler" type="button"
-            onClick={() => setNavOpen(v => !v)}
-          >
-            <span className="navbar-toggler-icon" />
-          </button>
-          <div className={`collapse navbar-collapse justify-content-end${navOpen ? ' show' : ''}`}>
-            <ul className="navbar-nav">
-              {['hero','pillars','events','founders','team','payment','faq'].map(s => (
-                <li className="nav-item" key={s}>
-                  <a
-                    className="nav-link px-3" href={`#${s}`}
-                    onClick={e => { e.preventDefault(); scrollTo(s); }}
-                  >
-                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                  </a>
-                </li>
-              ))}
-              <li className="nav-item">
-                <a
-                  className="nav-link px-3 btn btn-outline-warning ms-lg-3"
-                  href="#contact"
-                  onClick={e => { e.preventDefault(); scrollTo('contact'); }}
-                >
-                  Contact
-                </a>
-              </li>
-              {user ? (
-                <>
-                  {user.role === 'admin' && (
-                    <li className="nav-item">
-                      <Link
-                        href="/admin"
-                        className="nav-link px-3 btn btn-outline-info ms-lg-3 mt-2 mt-lg-0"
-                      >
-                        Admin
-                      </Link>
-                    </li>
-                  )}
-                  <li className="nav-item">
-                    <Link
-                      href="/dashboard"
-                      className="nav-link px-3 btn btn-glow ms-lg-3 mt-2 mt-lg-0"
-                    >
-                      Dashboard
-                    </Link>
-                  </li>
-                  <li className="nav-item">
-                    <a
-                      className="nav-link px-3 btn btn-outline-danger ms-lg-2 mt-2 mt-lg-0"
-                      href="#"
-                      onClick={async e => {
-                        e.preventDefault();
-                        await fetch('/api/logout', { method: 'POST' });
-                        router.push('/');
-                      }}
-                    >
-                      Logout
-                    </a>
-                  </li>
-                </>
-              ) : (
-                <li className="nav-item">
-                  <Link
-                    href="/login"
-                    className="nav-link px-3 btn btn-glow ms-lg-3 mt-2 mt-lg-0"
-                  >
-                    Login
-                  </Link>
-                </li>
-              )}
-            </ul>
-          </div>
-        </div>
-      </nav>
+      <Navbar 
+        user={user} 
+        logout={async (e) => {
+          if(e && e.preventDefault) e.preventDefault();
+          await fetch('/api/logout', { method: 'POST' });
+          router.push('/');
+        }} 
+      />
 
-      {/* ── Hero ──────────────────────────────────────────────── */}
-      <section id="hero" className="mystical-section">
+      {/* ── Home ──────────────────────────────────────────────── */}
+      <section id="home" className="mystical-section">
         <div className="container hero-content">
           <h1 className="reveal">
             The <span className="gold-gradient-text">Kala Vriksha</span>
           </h1>
           <p className="reveal">
-            Where mystical wisdom meets sacred growth. Dive into the deep roots of existence.
+            Kala Vriksha is a platform dedicated to holistic human development, where financial intelligence and inner transformation come together. Our programs are designed to help individuals grow financially, mentally, and spiritually, creating a balanced and meaningful life.
           </p>
           <a
             href="#stats"
@@ -424,37 +337,57 @@ export default function HomePage({ events, user }) {
           <h2 className="text-center gold-gradient-text mb-5 display-4 reveal">
             Sacred Gatherings
           </h2>
+          <div className="d-flex justify-content-center mb-4 reveal">
+            <div className="btn-group" role="group" aria-label="Event type filter">
+              <button
+                type="button"
+                className={`btn ${filter === 'online' ? 'btn-warning text-dark' : 'btn-outline-warning'}`}
+                onClick={() => setFilter('online')}
+                style={{ transition: 'all 200ms ease' }}
+              >
+                Online
+              </button>
+              <button
+                type="button"
+                className={`btn ${filter === 'offline' ? 'btn-warning text-dark' : 'btn-outline-warning'}`}
+                onClick={() => setFilter('offline')}
+                style={{ transition: 'all 200ms ease' }}
+              >
+                Offline
+              </button>
+            </div>
+          </div>
           <div className="row g-4 reveal">
-            {events.length === 0 ? (
+            {(filteredEvents || []).length === 0 ? (
               <div className="col-12 text-center text-light opacity-50">
-                <p>No upcoming gatherings at this moment. Stay tuned to the whispers of the universe.</p>
+                <p>No events available.</p>
               </div>
-            ) : events.map(ev => (
-              <div className="col-md-4" key={ev.id}>
+            ) : filteredEvents?.map(ev => (
+              <div className="col-md-4" key={ev._id || ev.id}>
                 <div className="founder-card h-100">
                   <div className="mb-3">
+                    <span className={`badge ${ev.type === 'online' ? 'bg-info' : 'bg-success'} text-dark px-3 py-2 rounded-pill me-2`}>
+                      {ev.type === 'online' ? 'Online' : 'Offline'}
+                    </span>
                     <span className="badge bg-warning text-dark px-3 py-2 rounded-pill">Upcoming</span>
                   </div>
-                  <h3 className="gold-gradient-text">{ev.name}</h3>
+                  <h3 className="gold-gradient-text">{ev.title || ev.name}</h3>
                   <p className="designation mb-3">
                     <i className="fas fa-calendar-day me-2" />
                     {new Date(ev.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
                   </p>
                   <p className="designation mb-3">
-                    <i className="fas fa-map-marker-alt me-2" />{ev.venue}
+                    <i className={`fas ${ev.type === 'online' ? 'fa-video' : 'fa-map-marker-alt'} me-2`} />
+                    {ev.type === 'online' ? 'Online Event' : ev.venue}
                   </p>
                   <p className="designation mb-3">
                     <i className="fas fa-user-tie me-2" />Guide: {ev.preacher}
                   </p>
-                  <p className="about-text">{ev.about}</p>
+                  <p className="about-text">{ev.description || ev.about}</p>
                   <div className="mt-auto">
-                    <a
-                      href="#payment"
-                      className="btn btn-outline-warning w-100"
-                      onClick={e => { e.preventDefault(); scrollTo('payment'); }}
-                    >
+                    <Link href="/login" className="btn btn-outline-warning w-100">
                       Reserve Spot
-                    </a>
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -478,7 +411,7 @@ export default function HomePage({ events, user }) {
             </p>
           </div>
           <div className="row g-4 reveal">
-            {founders.map(f => (
+            {founders?.map(f => (
               <div className="col-md-6" key={f.name}>
                 <div className="founder-card">
                   <div className="founder-img-wrapper">
@@ -513,7 +446,7 @@ export default function HomePage({ events, user }) {
             Our Core Team
           </h2>
           <div className="row g-4 reveal">
-            {team.map(t => (
+            {team?.map(t => (
               <div className="col-md-6" key={t.name}>
                 <div className="founder-card">
                   <div className="founder-img-wrapper">
@@ -533,66 +466,6 @@ export default function HomePage({ events, user }) {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Payment ───────────────────────────────────────────── */}
-      <section id="payment" className="mystical-section">
-        <div className="container">
-          <h2 className="text-center gold-gradient-text mb-5 display-4 reveal">
-            Sacred Exchange
-          </h2>
-          <div className="payment-card reveal">
-            <div className="row align-items-center">
-              <div className="col-lg-5 text-center mb-4 mb-lg-0">
-                <div className="position-relative d-inline-block mb-4" style={{ height: 200 }}>
-                  <div
-                    className="qr-wrapper mx-auto"
-                    style={{ transform: 'scale(0.8)', transformOrigin: 'top center', marginBottom: 0 }}
-                  >
-                    <img
-                      src="/payment_qr.png" alt="PhonePe Payment QR Code"
-                      style={{ width: 220, height: 220, objectFit: 'contain', borderRadius: 15 }}
-                      onError={e => { e.target.style.display = 'none'; }}
-                    />
-                  </div>
-                </div>
-                <div className="mt-3">
-                  <p className="mb-1 text-light opacity-50">Official UPI ID:</p>
-                  <div className="upi-id-box" onClick={copyUPI} style={{ cursor: 'pointer' }}>
-                    <span className="upi-text">ashishsony45@ybl</span>
-                    <i className="fas fa-copy text-warning" />
-                  </div>
-                </div>
-              </div>
-              <div className="col-lg-7">
-                <div className="payment-steps">
-                  <h4 className="gold-gradient-text mb-4">How to Register:</h4>
-                  {[
-                    'Scan the PhonePe QR code or use the UPI ID to initiate your sacred exchange.',
-                    'Note down your Transaction ID and take a Screenshot of the successful payment.',
-                    'Click the button below to fill the initiation form with your details and transaction proof.',
-                  ].map((step, i) => (
-                    <div className="step-item" key={i}>
-                      <div className="step-number">{i + 1}</div>
-                      <p>{step}</p>
-                    </div>
-                  ))}
-                </div>
-                <a
-                  href="https://docs.google.com/forms/d/e/1FAIpQLSf_pINJjs4RRSWATs3VosjuWd8jNDgGoOvwXoSbtWMjRh4sHw/viewform?usp=publish-editor"
-                  target="_blank" rel="noreferrer"
-                  className="btn btn-glow google-form-btn"
-                >
-                  <i className="fab fa-google me-2" /> Complete Registration Form
-                </a>
-                <p className="payment-notice">
-                  <i className="fas fa-info-circle me-1" />
-                  Your participation will be confirmed via email within 24 hours of form submission.
-                </p>
-              </div>
-            </div>
           </div>
         </div>
       </section>
@@ -652,6 +525,15 @@ export default function HomePage({ events, user }) {
             >
               <i className="fab fa-facebook" />
             </a>
+            <a
+              href="https://youtube.com/@kalavriksha-u5m?si=tUiva7OdRKqZEXjC"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="YouTube"
+              className="text-warning h4 mx-3"
+            >
+              <i className="fab fa-youtube" />
+            </a>
           </div>
           <p className="text-light opacity-50">
             &copy; 2026 Kala Vriksha Sacred Wisdom. All Rights Reserved.
@@ -661,7 +543,7 @@ export default function HomePage({ events, user }) {
 
       {/* Back to Top */}
       <a
-        href="#hero" id="back-to-top"
+        href="#home" id="back-to-top"
         className={showBackTop ? 'show' : ''}
         onClick={e => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
       >
@@ -673,9 +555,19 @@ export default function HomePage({ events, user }) {
 
 /* ─── Server-side props ─────────────────────────────────────────── */
 export async function getServerSideProps({ req }) {
-  const { readData } = await import('../lib/data');
-  const { getSession } = await import('../lib/session');
-  const events = readData('events');
-  const session = getSession(req);
-  return { props: { events, user: session } };
+  try {
+    const { getSession } = await import('../lib/session');
+    const session = getSession(req);
+
+    const { default: dbConnect } = await import('../lib/mongodb');
+    const { default: Event } = await import('../models/Event');
+
+    await dbConnect();
+    const events = await Event.find().sort({ date: 1 }).lean().then(docs => docs.map(d => ({ ...d, _id: d._id.toString() })));
+
+    return { props: { events: JSON.parse(JSON.stringify(events)), user: session } };
+  } catch (err) {
+    console.error('[Index] getServerSideProps error:', err);
+    return { props: { events: [], user: null } };
+  }
 }

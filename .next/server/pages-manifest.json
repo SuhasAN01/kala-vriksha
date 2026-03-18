@@ -4,8 +4,10 @@
   "/_document": "pages/_document.js",
   "/": "pages/index.js",
   "/login": "pages/login.js",
-  "/api/logout": "pages/api/logout.js",
   "/dashboard": "pages/dashboard.js",
+  "/api/upload": "pages/api/upload.js",
   "/api/auth": "pages/api/auth.js",
+  "/api/registrations": "pages/api/registrations.js",
+  "/api/logout": "pages/api/logout.js",
   "/admin": "pages/admin.js"
 }

@@ -1,8 +1,9 @@
-import { readData, writeData } from '../../lib/data';
+import dbConnect from '../../lib/mongodb';
+import User from '../../models/User';
 import { setSession } from '../../lib/session';
-import { encryptPassword, decryptPassword, isEncrypted } from '../../lib/crypto';
+import bcrypt from 'bcrypt';
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -10,7 +11,7 @@ export default function handler(req, res) {
   const { action } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Missing action' });
 
-  const users = readData('users');
+  await dbConnect();
 
   if (action === 'login') {
     const { identifier = '', password = '' } = req.body;
@@ -18,76 +19,103 @@ export default function handler(req, res) {
       return res.status(400).json({ error: 'Please fill in all fields.' });
     }
 
-    const found = users.find(u => {
-      const match = u.username === identifier.trim() || u.email === identifier.trim();
-      if (!match) return false;
+    const trimmedId = identifier.trim().toLowerCase();
+    const predefinedAdmins = ['ashish_sony', 'anurag_sony'];
+    let user;
 
-      // Compare: decrypt if encrypted, otherwise plain-text (backward compat)
-      let storedPassword;
-      if (isEncrypted(u.password)) {
-        storedPassword = decryptPassword(u.password);
-      } else {
-        storedPassword = u.password;
+    const isPredefined = predefinedAdmins.includes(trimmedId) && password === 'vriksha2026';
+    
+    if (isPredefined) {
+      // Check for user with this name (predefined admins use username as primary)
+      user = await User.findOne({ name: trimmedId });
+      if (!user) {
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        user = await User.create({
+          name: trimmedId,
+          email: `${trimmedId}@kalavriksha.com`, // Unique email for admin
+          password: hashedPassword,
+          role: 'admin'
+        });
+      } else if (user.role !== 'admin') {
+        user.role = 'admin';
+        await user.save();
       }
-      return storedPassword === password;
-    });
+    } else {
+      // Normal login: check name or email
+      user = await User.findOne({ 
+        $or: [
+          { name: trimmedId }, 
+          { email: trimmedId }
+        ] 
+      });
 
-    if (!found) {
-      return res.status(401).json({ error: 'Invalid credentials. The sanctuary remains closed to you.' });
-    }
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials. The sanctuary remains closed to you.' });
+      }
 
-    // Auto-upgrade: encrypt plain-text password on successful login
-    if (!isEncrypted(found.password)) {
-      const idx = users.findIndex(u => u.username === found.username);
-      users[idx].password = encryptPassword(password);
-      writeData('users', users);
+      const isMatch = await bcrypt.compare(password, user.password);
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid credentials. The sanctuary remains closed to you.' });
+      }
     }
 
     const session = {
-      username: found.username,
-      fullname: found.fullname,
-      role: found.role || 'user',
-      email: found.email,
-      phone: found.phone || '',
-      dob: found.dob || '',
+      id: user._id.toString(),
+      fullname: user.name,
+      role: user.role,
+      email: user.email,
     };
     setSession(res, session);
     return res.status(200).json({ role: session.role, fullname: session.fullname });
   }
 
   if (action === 'register') {
-    const { fullname = '', username = '', email = '', dob = '', phone = '', password = '' } = req.body;
-    if (!fullname || !username || !email || !password) {
+    const { fullname = '', email = '', password = '' } = req.body;
+    if (!fullname || !email || !password) {
       return res.status(400).json({ error: 'Please fill in all required fields.' });
     }
-    if (users.find(u => u.username === username.trim())) {
-      return res.status(400).json({ error: 'That username is already claimed in the sacred circle.' });
-    }
-    if (users.find(u => u.email === email.trim())) {
+
+    const existingUser = await User.findOne({ email: email.trim() });
+    if (existingUser) {
       return res.status(400).json({ error: 'This gateway (email) is already linked to another seeker.' });
     }
-    const newUser = {
-      username: username.trim(), email: email.trim(), fullname: fullname.trim(),
-      password: encryptPassword(password), role: 'user', dob: dob || '', phone: phone || '',
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const newUser = await User.create({
+      name: fullname.trim(),
+      email: email.trim(),
+      password: hashedPassword,
+      role: 'user',
+    });
+
+    const session = {
+      id: newUser._id.toString(),
+      fullname: newUser.name,
+      role: newUser.role,
+      email: newUser.email,
     };
-    users.push(newUser);
-    writeData('users', users);
-    const session = { username: newUser.username, fullname: newUser.fullname, role: 'user', email: newUser.email, phone: newUser.phone, dob: newUser.dob };
     setSession(res, session);
-    return res.status(200).json({ role: 'user', fullname: newUser.fullname });
+    return res.status(200).json({ role: 'user', fullname: newUser.name });
   }
 
   if (action === 'forgot_password') {
-    const { email = '', dob = '', new_password = '' } = req.body;
-    if (!email || !dob || !new_password) {
+    const { email = '', new_password = '' } = req.body;
+    if (!email || !new_password) {
       return res.status(400).json({ error: 'Please fill in all fields.' });
     }
-    const idx = users.findIndex(u => u.email === email.trim() && u.dob === dob.trim());
-    if (idx === -1) {
+    
+    const user = await User.findOne({ email: email.trim() });
+    if (!user) {
       return res.status(400).json({ error: 'No seeker found with these sacred details.' });
     }
-    users[idx].password = encryptPassword(new_password);
-    writeData('users', users);
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(new_password, salt);
+    await user.save();
+    
     return res.status(200).json({ success: true });
   }
 

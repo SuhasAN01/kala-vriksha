@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import ParticleBackground from '../components/ParticleBackground';
+import { useToast } from '../components/Toast';
+import Spinner from '../components/Spinner';
 
 /* ── Affirmations ─────────────────────────────────────── */
 const AFFIRMATIONS = [
@@ -201,39 +203,74 @@ function CalmMeChat({ fullname }) {
 
 /* ── Payment Modal ────────────────────────────────────── */
 function PaymentModal({ event, user, onClose, onSuccess }) {
+  const { showToast } = useToast();
   const [phone, setPhone] = useState(user.phone || '');
   const [txnId, setTxnId] = useState('');
-  const [screenshot, setScreenshot] = useState(null);
   const [method, setMethod] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [screenshotFile, setScreenshotFile] = useState(null);
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('File size should be less than 5MB', 'error');
+        e.target.value = null;
+        return;
+      }
+      setScreenshotFile(file);
+    }
+  };
 
   const confirm = async () => {
-    if (!phone.trim()) { alert('Please provide your phone number'); return; }
-    if (!txnId.trim()) { alert('Please enter your Transaction ID'); return; }
-    if (!screenshot) { alert('Please upload a screenshot of your payment'); return; }
+    if (!phone.trim()) { showToast('Please provide your phone number', 'error'); return; }
+    if (!txnId.trim()) { showToast('Please enter your Transaction ID', 'error'); return; }
+    if (!screenshotFile) { showToast('Please upload your payment screenshot', 'error'); return; }
 
     setSubmitting(true);
-    const fd = new FormData();
-    fd.append('screenshot', screenshot);
-    fd.append('eventId', event.id);
-    fd.append('eventName', event.name);
-    fd.append('eventDate', event.date);
-    fd.append('userName', user.fullname);
-    fd.append('userEmail', user.email);
-    fd.append('userPhone', phone);
-    fd.append('transactionId', txnId);
-
     try {
-      const res = await fetch('/api/registrations', { method: 'POST', body: fd });
+      // 1. Upload proof
+      const formData = new FormData();
+      formData.append('file', screenshotFile);
+      
+      const uploadRes = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!uploadRes.ok) {
+        const errData = await uploadRes.json();
+        throw new Error(errData.error || 'Proof upload failed');
+      }
+      const uploadData = await uploadRes.json();
+
+      // 2. Register
+      const payload = {
+        action: 'register',
+        eventId: event._id || event.id,
+        eventName: event.title || event.name,
+        eventDate: event.date,
+        userName: user.fullname,
+        userEmail: user.email,
+        userPhone: phone,
+        transactionId: txnId,
+        paymentScreenshot: uploadData.url
+      };
+
+      const res = await fetch('/api/registrations', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload) 
+      });
       const data = await res.json();
-      if (data.status === 'success') {
-        onSuccess(`Registration submitted for ${event.name}! Your proof is being verified.`);
+      if (data.success) {
+        onSuccess(`Registration submitted for ${event.title || event.name}! Your proof is being verified.`);
         onClose();
       } else {
-        alert(data.error || data.msg || 'Submission failed.');
+        showToast(data.error || 'Registration failed', 'error');
       }
-    } catch {
-      alert('Network error. Please try again.');
+    } catch (err) {
+      console.error('[Payment] Error:', err);
+      showToast(err.message, 'error');
     } finally {
       setSubmitting(false);
     }
@@ -254,7 +291,7 @@ function PaymentModal({ event, user, onClose, onSuccess }) {
             {/* Event Summary */}
             <div className="text-center mb-4">
               <i className="fas fa-om fa-3x text-warning mb-3" />
-              <h4 className="mb-2">{event.name}</h4>
+              <h4 className="mb-2">{event.title || event.name}</h4>
               <p className="text-white-50 small mb-1">
                 {new Date(event.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
               </p>
@@ -306,7 +343,7 @@ function PaymentModal({ event, user, onClose, onSuccess }) {
                     <p className="text-warning mb-3">Official UPI ID: <strong>ashishsony45@ybl</strong></p>
                     <button
                       className="btn btn-sm btn-outline-warning"
-                      onClick={() => navigator.clipboard.writeText('ashishsony45@ybl').then(() => alert('UPI ID copied!'))}
+                      onClick={() => navigator.clipboard.writeText('ashishsony45@ybl').then(() => showToast('UPI ID copied!'))}
                     >
                       <i className="fas fa-copy me-1" />Copy UPI ID
                     </button>
@@ -327,18 +364,8 @@ function PaymentModal({ event, user, onClose, onSuccess }) {
             {/* Upload Proof */}
             <div className="glass-panel p-3 mb-4">
               <h6 className="text-warning mb-3">
-                <i className="fas fa-file-upload me-2" />Upload Proof
+                <i className="fas fa-file-invoice me-2" />Transaction Details
               </h6>
-              <div className="mb-3">
-                <label className="form-label small text-white-50">
-                  Transaction Screenshot (JPG, PNG, PDF)
-                </label>
-                <input
-                  type="file" className="form-control bg-dark text-light border-secondary"
-                  accept=".jpg,.jpeg,.png,.pdf"
-                  onChange={e => setScreenshot(e.target.files[0] || null)}
-                />
-              </div>
               <div className="mb-3">
                 <label className="form-label small text-white-50">Transaction ID</label>
                 <input
@@ -347,15 +374,24 @@ function PaymentModal({ event, user, onClose, onSuccess }) {
                   value={txnId} onChange={e => setTxnId(e.target.value)}
                 />
               </div>
+              <div className="mb-3">
+                <label className="form-label small text-white-50">Upload Payment Screenshot</label>
+                <input
+                  type="file" accept="image/jpeg, image/png, image/webp" className="form-control bg-dark text-light border-secondary"
+                  onChange={handleFileChange}
+                />
+              </div>
             </div>
           </div>
           <div className="modal-footer border-secondary flex-column">
             <button
-              className="btn btn-glow w-100 mb-2"
+              className="btn btn-glow w-100 mb-2 d-flex align-items-center justify-content-center"
               onClick={confirm}
               disabled={submitting}
             >
-              <i className="fas fa-check-circle me-2" />
+              {submitting ? <Spinner size="1.2rem" color="#000" className="me-2" /> : (
+                <i className="fas fa-check-circle me-2" />
+              )}
               {submitting ? 'Submitting...' : 'Confirm Payment & Register'}
             </button>
             <button className="btn btn-outline-secondary w-100" onClick={onClose}>Cancel</button>
@@ -367,14 +403,14 @@ function PaymentModal({ event, user, onClose, onSuccess }) {
 }
 
 /* ── Dashboard Page ───────────────────────────────────── */
-export default function DashboardPage({ user, events, registrations: initRegs }) {
+export default function DashboardPage({ user = {}, events = [], registrations: initRegs = [] }) {
   const router = useRouter();
+  const { showToast } = useToast();
   const [activeSection, setActiveSection] = useState('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [affirmation, setAffirmation] = useState('"You are calm, focused and capable."');
   const [paymentModal, setPaymentModal] = useState(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [registrations, setRegistrations] = useState(initRegs);
+  const [registrations, setRegistrations] = useState(initRegs || []);
   const [journalDate, setJournalDate] = useState('');
   const [journalText, setJournalText] = useState('');
 
@@ -382,18 +418,14 @@ export default function DashboardPage({ user, events, registrations: initRegs })
     setJournalDate(new Date().toISOString().slice(0, 10));
   }, []);
 
-  const showSuccess = msg => {
-    setSuccessMsg(msg);
-    setTimeout(() => setSuccessMsg(''), 5000);
-  };
-
   const doLogout = async () => {
     await fetch('/api/logout', { method: 'POST' });
+    showToast('Logged out. Your journey continues within.');
     router.push('/');
   };
 
-  const registeredEventIds = registrations.map(r => r.eventId);
-  const firstName = user.fullname.split(' ')[0];
+  const registeredEventIds = (registrations || []).map(r => r?.eventId);
+  const firstName = (user?.fullname || 'Seeker').split(' ')[0];
 
   const navItems = [
     { id: 'overview', icon: 'fa-th-large', label: 'Dashboard' },
@@ -404,20 +436,91 @@ export default function DashboardPage({ user, events, registrations: initRegs })
     { id: 'settings', icon: 'fa-user-cog', label: 'Profile Settings' },
   ];
 
-  const downloadReceipt = reg => {
-    const html = `<!DOCTYPE html><html><head><title>Receipt</title><style>body{font-family:Arial;padding:40px;color:#333}h1{color:#D4AF37}table{width:100%;border-collapse:collapse}td{padding:10px;border-bottom:1px solid #ddd}.footer{margin-top:40px;text-align:center;color:#777;font-size:.9em}</style></head><body><h1>KALA VRIKSHA</h1><h3>Payment Receipt</h3><table><tr><td><strong>Participant:</strong></td><td>${reg.userName}</td></tr><tr><td><strong>Event:</strong></td><td>${reg.eventName}</td></tr><tr><td><strong>Transaction ID:</strong></td><td>${reg.transactionId}</td></tr><tr><td><strong>Date:</strong></td><td>${new Date(reg.registrationDate).toLocaleDateString()}</td></tr><tr><td><strong>Status:</strong></td><td>${reg.paymentStatus === 'verified' ? 'Confirmed' : 'Pending'}</td></tr></table><div class="footer"><p>Thank you for registering. May peace be with you.</p><p>This is a system generated receipt.</p></div></body></html>`;
-    const blob = new Blob([html], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `Receipt_${reg.transactionId}.html`;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
+  const downloadReceipt = async (reg) => {
+    // Resolve fields from populated objects or snapshot fields
+    const event = reg?.eventId;
+    const isOnline = event?.type?.toLowerCase?.() === 'online';
+    const participant = reg.userId?.name || reg.userName || 'N/A';
+    const eventTitle = reg.eventId?.title || reg.eventName || 'N/A';
+    const eventDateRaw = reg.eventId?.date || reg.eventDate || null;
+    const eventDateStr = eventDateRaw ? new Date(eventDateRaw).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : 'N/A';
+    const registeredOn = reg.createdAt ? new Date(reg.createdAt).toLocaleString('en-IN') : 'N/A';
+    const status = reg.paymentStatus === 'verified' ? 'Confirmed' : 'Pending';
+    const classLink = isOnline && event?.classLink ? event.classLink : null;
+
+    // TEMP debug
+    console.log('Event:', event);
+    console.log('ClassLink:', classLink);
+
+    // Build an off-screen receipt div
+    const div = document.createElement('div');
+    div.style.cssText = 'position:fixed;left:-9999px;top:0;width:595px;background:#fff;color:#333;font-family:Arial,sans-serif;padding:40px;box-sizing:border-box;';
+    div.innerHTML = `
+      <div style="text-align:center;border-bottom:3px solid #D4AF37;padding-bottom:20px;margin-bottom:20px">
+        <h1 style="color:#D4AF37;margin:0;font-size:28px;letter-spacing:2px">KALA VRIKSHA</h1>
+        <p style="margin:4px 0;color:#666;font-size:13px">Sacred Wisdom · Holistic Growth</p>
+        <h2 style="margin:10px 0 0;font-size:18px">Payment Receipt</h2>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:30px">
+        <tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666;width:40%">Participant</td><td style="padding:10px 0;border-bottom:1px solid #eee;font-weight:bold">${participant}</td></tr>
+        <tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666">Event</td><td style="padding:10px 0;border-bottom:1px solid #eee">${eventTitle}</td></tr>
+        <tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666">Event Date</td><td style="padding:10px 0;border-bottom:1px solid #eee">${eventDateStr}</td></tr>
+        ${classLink ? `<tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666">Class Link</td><td style="padding:10px 0;border-bottom:1px solid #eee"><a href="${classLink}" target="_blank" rel="noreferrer" style="color:#0d6efd;text-decoration:underline;word-break:break-all">${classLink}</a></td></tr>` : ''}
+        <tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666">Transaction ID</td><td style="padding:10px 0;border-bottom:1px solid #eee;font-family:monospace">${reg.transactionId}</td></tr>
+        <tr><td style="padding:10px 0;border-bottom:1px solid #eee;color:#666">Registered On</td><td style="padding:10px 0;border-bottom:1px solid #eee">${registeredOn}</td></tr>
+        <tr><td style="padding:10px 0;color:#666">Status</td><td style="padding:10px 0;color:${status === 'Confirmed' ? '#2ecc71' : '#f39c12'};font-weight:bold">${status}</td></tr>
+      </table>
+      <div style="text-align:center;color:#999;font-size:12px;border-top:1px solid #eee;padding-top:20px">
+        <p>Thank you for joining Kala Vriksha. May peace guide your journey.</p>
+        <p>This is a system generated receipt.</p>
+      </div>`;
+    document.body.appendChild(div);
+
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      const { default: html2canvas } = await import('html2canvas');
+      const canvas = await html2canvas(div, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      if (classLink) {
+        // Add link AFTER receipt content so it reliably appears
+        const pageH = pdf.internal.pageSize.getHeight();
+        let yPosition = Math.min(pageH - 60, pdfHeight + 24);
+        if (!Number.isFinite(yPosition)) yPosition = pageH - 60;
+
+        pdf.setFontSize(11);
+        pdf.setTextColor(0, 0, 0);
+        pdf.text('Class Link:', 40, yPosition);
+
+        yPosition += 14;
+        pdf.setTextColor(13, 110, 253);
+        // Prefer native helper when available (clickable)
+        if (typeof pdf.textWithLink === 'function') {
+          pdf.textWithLink('Join Class', 40, yPosition, { url: classLink });
+        } else {
+          pdf.text('Join Class', 40, yPosition);
+          if (typeof pdf.link === 'function') {
+            pdf.link(40, yPosition - 11, 120, 14, { url: classLink });
+          }
+        }
+        pdf.setTextColor(0, 0, 0);
+      }
+      pdf.save(`KalaVriksha_Receipt_${reg.transactionId}.pdf`);
+    } finally {
+      document.body.removeChild(div);
+    }
   };
 
   const afterPayment = async () => {
-    // Refresh registrations from server
-    const res = await fetch('/api/registrations');
-    if (res.ok) setRegistrations(await res.json());
+    try {
+      const res = await fetch('/api/registrations');
+      if (res.ok) setRegistrations(await res.json());
+    } catch (err) {
+      console.error('[Dashboard] afterPayment fetch error:', err);
+    }
   };
 
   return (
@@ -425,15 +528,6 @@ export default function DashboardPage({ user, events, registrations: initRegs })
       <Head><title>Dashboard | Kala Vriksha</title></Head>
       <ParticleBackground />
 
-      {successMsg && (
-        <div
-          className="alert alert-success alert-dismissible position-fixed top-0 start-50 translate-middle-x mt-3"
-          style={{ zIndex: 9998, minWidth: 350 }}
-        >
-          <i className="fas fa-check-circle me-2" />{successMsg}
-          <button type="button" className="btn-close" onClick={() => setSuccessMsg('')} />
-        </div>
-      )}
 
       <div className="dashboard-container">
         {/* Mobile toggle */}
@@ -586,7 +680,7 @@ export default function DashboardPage({ user, events, registrations: initRegs })
                         <p className="text-white-50">No upcoming events available</p>
                       </div>
                     ) : events.slice(0, 4).map(ev => (
-                      <div key={ev.id} className="d-flex align-items-center p-3 mb-3 border border-secondary border-opacity-50 rounded-3">
+                      <div key={ev._id || ev.id} className="d-flex align-items-center p-3 mb-3 border border-secondary border-opacity-50 rounded-3">
                         <div className="bg-dark text-center p-2 rounded-3 me-3 border border-warning" style={{ minWidth: 55 }}>
                           <span className="d-block small text-warning text-uppercase">
                             {new Date(ev.date).toLocaleDateString('en-US', { month: 'short' })}
@@ -594,12 +688,13 @@ export default function DashboardPage({ user, events, registrations: initRegs })
                           <span className="d-block fs-4 fw-bold">{new Date(ev.date).getDate()}</span>
                         </div>
                         <div className="flex-grow-1">
-                          <h5 className="mb-1">{ev.name}</h5>
+                          <h5 className="mb-1">{ev.title || ev.name}</h5>
                           <p className="text-white-50 small mb-0">
-                            <i className="fas fa-map-marker-alt text-warning me-1" />{ev.venue}
+                            <i className={`fas ${ev.type === 'online' ? 'fa-video' : 'fa-map-marker-alt'} text-warning me-1`} />
+                            {ev.type === 'online' ? 'Online' : ev.venue}
                           </p>
                         </div>
-                        {registeredEventIds.includes(ev.id) ? (
+                        {registeredEventIds.includes(ev._id || ev.id) ? (
                           <button className="btn btn-secondary btn-sm" disabled>Registered</button>
                         ) : (
                           <button className="btn btn-glow btn-sm" onClick={() => setPaymentModal(ev)}>
@@ -628,27 +723,49 @@ export default function DashboardPage({ user, events, registrations: initRegs })
                     </div>
                   </div>
                 ) : events.map(ev => (
-                  <div className="col-md-6 col-lg-4" key={ev.id}>
+                  <div className="col-md-6 col-lg-4" key={ev._id || ev.id}>
                     <div className="card bg-dark text-light border-secondary h-100 overflow-hidden" style={{ borderRadius: 20 }}>
                       <div className="position-relative">
-                        <img
-                          src="https://images.unsplash.com/photo-1545389336-cf090694435e?auto=format&fit=crop&q=80&w=400"
-                          className="card-img-top" alt="Event"
-                          style={{ height: 200, objectFit: 'cover' }}
-                        />
+                        <div style={{ 
+                          width: '100%', 
+                          height: '250px', 
+                          overflow: 'hidden',
+                          borderRadius: '12px 12px 0 0'
+                        }}>
+                          <img
+                            src={ev.image && ev.image.trim() !== ""
+                              ? ev.image
+                              : "https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=400"}
+                            alt={ev.title || "Event"}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'contain',
+                              objectPosition: 'center',
+                              backgroundColor: '#1a2a1a',
+                              borderRadius: '12px 12px 0 0',
+                              display: 'block',
+                            }}
+                          />
+                        </div>
                         <span className="position-absolute top-0 end-0 bg-warning text-dark px-3 py-1 m-3 rounded-pill fw-bold">
                           ₹{ev.price || '499'}
                         </span>
                       </div>
                       <div className="card-body p-4">
-                        <h4 className="card-title text-warning">{ev.name}</h4>
-                        <p className="card-text text-white-50 small">{ev.about}</p>
+                        <div className="mb-2">
+                          <span className={`badge ${ev.type === 'online' ? 'bg-info text-dark' : 'bg-success text-white'} px-2 py-1 rounded-pill small`}>
+                            {ev.type === 'online' ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                        <h4 className="card-title text-warning">{ev.title || ev.name}</h4>
+                        <p className="card-text text-white-50 small">{ev.description || ev.about}</p>
                         <ul className="list-unstyled mb-4 small">
-                          <li className="mb-2"><i className="fas fa-user-tie text-warning me-2" /><strong>Instructor:</strong> {ev.preacher}</li>
+                          <li className="mb-2"><i className="fas fa-user-tie text-warning me-2" /><strong>Guide:</strong> {ev.preacher}</li>
                           <li className="mb-2"><i className="far fa-calendar-alt text-warning me-2" /><strong>Date:</strong> {new Date(ev.date).toLocaleDateString('en-IN')}</li>
-                          <li className="mb-2"><i className="fas fa-map-marker-alt text-warning me-2" /><strong>Location:</strong> {ev.venue}</li>
+                          <li className="mb-2"><i className={`fas ${ev.type === 'online' ? 'fa-video' : 'fa-map-marker-alt'} text-warning me-2`} /><strong>Location:</strong> {ev.type === 'online' ? 'Online Event' : ev.venue}</li>
                         </ul>
-                        {registeredEventIds.includes(ev.id) ? (
+                        {registeredEventIds.includes(ev._id || ev.id) ? (
                           <button className="btn btn-secondary w-100" disabled>Already Registered</button>
                         ) : (
                           <button className="btn btn-glow w-100" onClick={() => setPaymentModal(ev)}>
@@ -768,30 +885,65 @@ export default function DashboardPage({ user, events, registrations: initRegs })
                         <th className="py-3 px-4 text-warning fw-normal">Date</th>
                         <th className="py-3 px-4 text-warning fw-normal">Amount</th>
                         <th className="py-3 px-4 text-warning fw-normal">Status</th>
+                        <th className="py-3 px-4 text-warning fw-normal">Join</th>
                         <th className="py-3 px-4 text-warning fw-normal text-end">Receipt</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {registrations.length === 0 ? (
+                      {(registrations || []).length === 0 ? (
                         <tr>
-                          <td colSpan="6" className="text-center py-4 text-white-50">
+                          <td colSpan="7" className="text-center py-4 text-white-50">
                             No transaction history found.
                           </td>
                         </tr>
-                      ) : registrations.map(reg => {
-                        const ev = events.find(e => e.id === reg.eventId);
-                        const amount = ev?.price || '499';
+                      ) : registrations?.map(reg => {
+                        const ev = events.find(e => (e._id || e.id) === (reg.eventId?._id || reg.eventId));
+                        const evTitle = reg.eventId?.title || reg.eventName || 'N/A';
+                        const regDateStr = reg.createdAt ? new Date(reg.createdAt).toLocaleDateString('en-IN') : 'N/A';
+                        const amount = ev?.price || reg.eventId?.price || '499';
                         return (
-                          <tr key={reg.id}>
-                            <td className="px-4 py-3 fw-bold">{reg.eventName}</td>
+                          <tr key={reg._id || reg.id}>
+                            <td className="px-4 py-3 fw-bold">{evTitle}</td>
                             <td className="px-4 py-3 text-white-50" style={{ fontFamily: 'monospace' }}>{reg.transactionId}</td>
-                            <td className="px-4 py-3">{new Date(reg.registrationDate).toLocaleDateString('en-IN')}</td>
+                            <td className="px-4 py-3">{regDateStr}</td>
                             <td className="px-4 py-3 text-success">₹{amount}</td>
                             <td className="px-4 py-3">
                               {reg.paymentStatus === 'verified'
                                 ? <span className="badge bg-success px-3 py-2 rounded-pill">Confirmed</span>
                                 : <span className="badge bg-warning text-dark px-3 py-2 rounded-pill">Pending</span>
                               }
+                            </td>
+                            <td className="px-4 py-3">
+                              {(() => {
+                                const isConfirmed = reg.paymentStatus === 'verified' || reg.paymentStatus === 'confirmed';
+                                const eventType = (reg.eventType || reg.eventId?.type || '').toLowerCase().trim();
+                                const joinLink = eventType === 'online' ? reg.classLink || reg.eventId?.classLink : reg.whatsappLink || reg.eventId?.whatsappLink;
+
+                                console.log('JOIN DEBUG:', {
+                                  event: reg.eventName || reg.eventId?.title,
+                                  isConfirmed,
+                                  eventType,
+                                  classLink: reg.classLink,
+                                  whatsappLink: reg.whatsappLink,
+                                  joinLink,
+                                  rawEventId: reg.eventId
+                                });
+
+                                if (isConfirmed && joinLink && joinLink.trim() !== '') {
+                                  return (
+                                    <a
+                                      href={joinLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="btn btn-sm btn-success rounded-pill px-3"
+                                      style={{ fontSize: '0.8rem', whiteSpace: 'nowrap' }}
+                                    >
+                                      {eventType === 'online' ? '🔗 Join Class' : '💬 WhatsApp'}
+                                    </a>
+                                  );
+                                }
+                                return <span className="text-white-50">—</span>;
+                              })()}
                             </td>
                             <td className="px-4 py-3 text-end">
                               {reg.paymentStatus === 'verified' ? (
@@ -889,7 +1041,7 @@ export default function DashboardPage({ user, events, registrations: initRegs })
                     </div>
 
                     <div className="text-end mt-5">
-                      <button className="btn btn-glow px-5 rounded-pill" onClick={() => showSuccess('Settings saved!')}>
+                      <button className="btn btn-glow px-5 rounded-pill" onClick={() => showToast('Settings saved!')}>
                         <i className="fas fa-save me-2" />Save Changes
                       </button>
                     </div>
@@ -908,7 +1060,7 @@ export default function DashboardPage({ user, events, registrations: initRegs })
           user={user}
           onClose={() => setPaymentModal(null)}
           onSuccess={async msg => {
-            showSuccess(msg);
+            showToast(msg);
             await afterPayment();
           }}
         />
@@ -918,17 +1070,45 @@ export default function DashboardPage({ user, events, registrations: initRegs })
 }
 
 export async function getServerSideProps({ req }) {
-  const { getSession } = await import('../lib/session');
-  const { readData } = await import('../lib/data');
-  const session = getSession(req);
-  if (!session) {
-    return { redirect: { destination: '/login', permanent: false } };
-  }
-  const events = readData('events');
-  const allRegs = readData('registrations');
-  const userRegs = allRegs
-    .filter(r => r.userEmail === session.email || r.userName === session.fullname)
-    .sort((a, b) => new Date(b.registrationDate) - new Date(a.registrationDate));
+  try {
+    const { getSession } = await import('../lib/session');
+    const session = getSession(req);
+    if (!session) {
+      return { redirect: { destination: '/login', permanent: false } };
+    }
 
-  return { props: { user: session, events, registrations: userRegs } };
+    const { default: dbConnect } = await import('../lib/mongodb');
+    const { default: Event } = await import('../models/Event');
+    const { default: Registration } = await import('../models/Registration');
+
+    await dbConnect();
+
+    const events = await Event.find().sort({ date: 1 }).lean()
+      .then(docs => docs.map(d => ({ ...d, _id: d._id.toString() })));
+
+    const userRegs = await Registration.find({ userId: session.id })
+      .sort({ createdAt: -1 })
+      .populate('eventId', 'title date price type classLink whatsappLink')
+      .lean()
+      .then(docs => docs.map(d => ({
+        ...d,
+        _id: d._id.toString(),
+        eventId: d.eventId ? { ...d.eventId, _id: d.eventId._id?.toString() } : d.eventId,
+        // Flatten event join fields directly onto the registration for easy access
+        classLink: d.eventId?.classLink || '',
+        whatsappLink: d.eventId?.whatsappLink || '',
+        eventType: d.eventId?.type || '',
+      })));
+
+    return {
+      props: {
+        user: session,
+        events: JSON.parse(JSON.stringify(events)),
+        registrations: JSON.parse(JSON.stringify(userRegs))
+      }
+    };
+  } catch (err) {
+    console.error('[Dashboard] getServerSideProps error:', err);
+    return { props: { user: {}, events: [], registrations: [] } };
+  }
 }

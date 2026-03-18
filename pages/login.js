@@ -2,11 +2,13 @@ import { useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import ParticleBackground from '../components/ParticleBackground';
+import { useToast } from '../components/Toast';
+import Spinner from '../components/Spinner';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { showToast } = useToast();
   const [tab, setTab] = useState('login');
-  const [alert, setAlert] = useState(null);
 
   // Login form
   const [loginForm, setLoginForm] = useState({ identifier: '', password: '' });
@@ -19,11 +21,6 @@ export default function LoginPage() {
   const [showForgot, setShowForgot] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const showAlert = (type, text) => {
-    setAlert({ type, text });
-    setTimeout(() => setAlert(null), 6000);
-  };
-
   const handleLogin = async e => {
     e.preventDefault();
     setSubmitting(true);
@@ -35,8 +32,9 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        showAlert('danger', data.error || 'Login failed.');
+        showToast(data.error || 'Login failed.', 'error');
       } else {
+        showToast('Welcome back to the circle.');
         if (data.role === 'admin') {
           router.push('/admin');
         } else {
@@ -44,7 +42,7 @@ export default function LoginPage() {
         }
       }
     } catch {
-      showAlert('danger', 'A network error occurred.');
+      showToast('A network error occurred.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -61,12 +59,13 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        showAlert('danger', data.error || 'Registration failed.');
+        showToast(data.error || 'Registration failed.', 'error');
       } else {
+        showToast('Initiation complete. Welcome.');
         router.push('/dashboard');
       }
     } catch {
-      showAlert('danger', 'A network error occurred.');
+      showToast('A network error occurred.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -83,13 +82,13 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        showAlert('danger', data.error || 'Failed to reset password.');
+        showToast(data.error || 'Failed to reset password.', 'error');
       } else {
         setShowForgot(false);
-        showAlert('success', 'Password restored. The new path awaits you.');
+        showToast('Password restored. The new path awaits you.');
       }
     } catch {
-      showAlert('danger', 'A network error occurred.');
+      showToast('A network error occurred.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -123,18 +122,6 @@ export default function LoginPage() {
             <p className="text-light opacity-50">Join the Circle of Mystical Wisdom</p>
           </div>
 
-          {/* Alert */}
-          {alert && (
-            <div
-              className={`alert alert-${alert.type} alert-dismissible fade show bg-dark text-${alert.type} border-${alert.type} small mb-4`}
-              role="alert"
-            >
-              <i className={`fas fa-${alert.type === 'success' ? 'check-circle' : 'exclamation-circle'} me-2`} />
-              {alert.text}
-              <button type="button" className="btn-close btn-close-white" onClick={() => setAlert(null)} />
-            </div>
-          )}
-
           {/* Tabs */}
           <ul className="nav nav-tabs justify-content-center" id="loginTabs">
             <li className="nav-item">
@@ -142,6 +129,7 @@ export default function LoginPage() {
                 className={`nav-link${tab === 'login' ? ' active' : ''}`}
                 onClick={() => setTab('login')}
               >Login</button>
+
             </li>
             <li className="nav-item">
               <button
@@ -193,7 +181,8 @@ export default function LoginPage() {
                   Forgot Password?
                 </button>
               </div>
-              <button type="submit" className="btn btn-glow w-100 py-3" disabled={submitting}>
+              <button type="submit" className="btn btn-glow w-100 py-3 d-flex align-items-center justify-content-center" disabled={submitting}>
+                {submitting ? <Spinner size="1.2rem" color="#000" className="me-2" /> : null}
                 {submitting ? 'Entering...' : 'Enter the Temple'}
               </button>
             </form>
@@ -255,7 +244,8 @@ export default function LoginPage() {
                   onChange={e => setRegForm({ ...regForm, password: e.target.value })}
                 />
               </div>
-              <button type="submit" className="btn btn-glow w-100 py-3" disabled={submitting}>
+              <button type="submit" className="btn btn-glow w-100 py-3 d-flex align-items-center justify-content-center" disabled={submitting}>
+                {submitting ? <Spinner size="1.2rem" color="#000" className="me-2" /> : null}
                 {submitting ? 'Initiating...' : 'Initiate Journey'}
               </button>
             </form>
@@ -316,11 +306,13 @@ export default function LoginPage() {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-glow" disabled={submitting}>
+                  <button type="submit" className="btn btn-glow d-flex align-items-center" disabled={submitting}>
+                    {submitting ? <Spinner size="1.2rem" color="#000" className="me-2" /> : null}
                     Restore Access
                   </button>
                 </div>
               </form>
+
             </div>
           </div>
         </div>
