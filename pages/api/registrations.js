@@ -1,5 +1,6 @@
 import dbConnect from '../../lib/mongodb';
 import Registration from '../../models/Registration';
+import Event from '../../models/Event';
 import { getSession } from '../../lib/session';
 
 export default async function handler(req, res) {
