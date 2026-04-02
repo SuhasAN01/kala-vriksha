@@ -5,8 +5,13 @@ export const config = {
 import dbConnect from '../../lib/mongodb';
 import Event from '../../models/Event';
 import formidable from 'formidable';
-import fs from 'fs';
-import path from 'path';
+import { v2 as cloudinary } from 'cloudinary';
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 export default async function handler(req, res) {
   await dbConnect();
@@ -19,11 +24,6 @@ export default async function handler(req, res) {
 
   // POST — parse as multipart always (formidable handles both form and JSON-like)
   if (req.method === 'POST') {
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    if (!fs.existsSync(uploadsDir)) {
-      fs.mkdirSync(uploadsDir, { recursive: true });
-    }
-
     const form = formidable({
       uploadDir: '/tmp',
       keepExtensions: true,
@@ -56,12 +56,17 @@ export default async function handler(req, res) {
       const imageFile = Array.isArray(files.image) ? files.image[0] : files.image;
 
       if (imageFile && imageFile.size > 0) {
-        const ext = path.extname(imageFile.originalFilename || '.jpg');
-        const newFilename = `event_${Date.now()}${ext}`;
-        const destPath = path.join(uploadsDir, newFilename);
-        fs.renameSync(imageFile.filepath, destPath);
-        imagePath = `/uploads/${newFilename}`;
-        console.log('Image saved to:', imagePath);
+        try {
+          const result = await cloudinary.uploader.upload(imageFile.filepath, {
+            folder: 'kala-vriksha-events',
+            resource_type: 'auto',
+          });
+          imagePath = result.secure_url;
+          console.log('Image uploaded to Cloudinary:', imagePath);
+        } catch (uploadErr) {
+          console.error('Cloudinary upload error:', uploadErr);
+          return res.status(500).json({ error: 'Image upload failed' });
+        }
       } else {
         console.log('No image file received');
       }
